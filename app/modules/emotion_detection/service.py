@@ -16,18 +16,28 @@ class EmotionDetectionService:
     
     def __init__(self):
         """Initialize OpenSmile emotion detection service."""
+        logger.info("=" * 60)
+        logger.info("Initializing EmotionDetectionService...")
         try:
             import opensmile
+            logger.info("OpenSmile library imported successfully")
             self.smile = opensmile.Smile(
                 feature_set=opensmile.FeatureSet.eGeMAPSv02,
                 feature_level=opensmile.FeatureLevel.Functionals,
             )
             self.opensmile_available = True
-            logger.info("OpenSmile initialized successfully")
-        except ImportError:
-            logger.warning("OpenSmile not available, using mock emotion detection")
+            logger.info("✓ OpenSmile initialized successfully - REAL MODEL ACTIVE")
+            logger.info(f"Feature set: eGeMAPSv02, Level: Functionals")
+        except ImportError as e:
+            logger.warning("✗ OpenSmile not available, using mock emotion detection")
+            logger.warning(f"Import error: {e}")
             self.smile = None
             self.opensmile_available = False
+        except Exception as e:
+            logger.error(f"✗ Failed to initialize OpenSmile: {e}")
+            self.smile = None
+            self.opensmile_available = False
+        logger.info("=" * 60)
     
     async def detect_emotion(self, audio_data: bytes, filename: str = "audio.wav") -> Dict:
         """
@@ -43,9 +53,13 @@ class EmotionDetectionService:
         Raises:
             Exception: If emotion detection fails
         """
+        logger.info(f"[DETECT_EMOTION] Starting emotion detection for file: {filename}")
+        logger.info(f"[DETECT_EMOTION] Audio data size: {len(audio_data)} bytes")
+        logger.info(f"[DETECT_EMOTION] OpenSmile available: {self.opensmile_available}")
+        
         if self.smile is None:
             # Fallback to mock emotion detection
-            logger.warning("OpenSmile not available, using mock detection")
+            logger.warning("⚠ OpenSmile not available, using MOCK detection (not real model)")
             return await self._mock_emotion_detection(audio_data)
         
         temp_path = None
@@ -69,10 +83,14 @@ class EmotionDetectionService:
                 if file_size == 0:
                     raise ValueError(f"Temporary file is empty: {temp_path}")
                 
-                logger.debug(f"Processing audio file: {temp_path} (size: {file_size} bytes)")
+                logger.info(f"[OPENSMILE] Processing audio file: {temp_path} (size: {file_size} bytes)")
+                logger.info(f"[OPENSMILE] Calling OpenSmile.process_file() - REAL MODEL EXTRACTION")
                 
                 # Extract features using OpenSmile (supports MP3, WAV, FLAC, etc.)
                 features = self.smile.process_file(temp_path)
+                
+                logger.info(f"[OPENSMILE] ✓ Feature extraction completed")
+                logger.info(f"[OPENSMILE] Features shape: {features.shape if features is not None else 'None'}")
             except:
                 # Close fd if still open
                 try:
@@ -85,10 +103,14 @@ class EmotionDetectionService:
                 raise ValueError("OpenSmile returned empty features")
             
             # Extract key emotional attributes
+            logger.info(f"[PROCESSING] Extracting emotional attributes from OpenSmile features")
             attributes = self._extract_emotional_attributes(features)
+            logger.info(f"[PROCESSING] Extracted attributes: {attributes}")
             
             # Classify emotion based on attributes
+            logger.info(f"[CLASSIFICATION] Classifying emotion based on attributes")
             emotion = self._classify_emotion(attributes)
+            logger.info(f"[CLASSIFICATION] ✓ Classified as: {emotion}")
             
             logger.info(f"Emotion detected: {emotion} (pitch: {attributes.get('pitch_mean', 0):.2f}, energy: {attributes.get('energy', 0):.2f}, rate: {attributes.get('speaking_rate', 0):.2f})")
             logger.debug(f"Full attributes: {attributes}")
@@ -147,6 +169,8 @@ class EmotionDetectionService:
         energy_mean = feature_dict.get("loudness_sma3_amean", 0)
         speaking_rate = feature_dict.get("loudness_sma3_percentile20.0", 0)
         
+        logger.debug(f"[FEATURES] Raw pitch: {pitch_mean}, energy: {energy_mean}, rate: {speaking_rate}")
+        
         # Normalize to 0-1 range (rough estimates)
         attributes = {
             "pitch_mean": np.clip((pitch_mean + 100) / 200, 0, 1),
@@ -170,38 +194,41 @@ class EmotionDetectionService:
         energy = attributes.get("energy", 0.5)
         speaking_rate = attributes.get("speaking_rate", 0.5)
         
-        # Rule-based classification with realistic thresholds
-        # High pitch is a strong indicator even if energy is moderate (scared, surprised, shouting)
+        # Rule-based classification with balanced thresholds
+        # Each emotion has distinct acoustic patterns
         
-        # Very high pitch (>0.68) → surprised or angry (scared/shouting)
-        if pitch > 0.68:
-            if energy > 0.55 or speaking_rate > 0.6:
-                return "angry"  # High pitch with some energy = shouting/angry
-            else:
-                return "surprised"  # High pitch alone = surprised/scared
-        
-        # High energy with elevated pitch → angry
-        elif energy > 0.65 and pitch > 0.55:
+        # ANGRY: High energy + high pitch + fast rate (shouting)
+        if energy > 0.7 and pitch > 0.6:
             return "angry"
         
-        # Moderate-high pitch and energy → happy or surprised
-        elif pitch > 0.6 and energy > 0.5:
-            if speaking_rate > 0.6:
-                return "happy"
-            else:
-                return "surprised"
-        
-        # Very high energy alone (even with moderate pitch) → angry
-        elif energy > 0.75:
+        # ANGRY: Very high energy alone (aggressive)
+        if energy > 0.8:
             return "angry"
         
-        # Low pitch and energy → sad
-        elif pitch < 0.4 and energy < 0.4:
+        # HAPPY: Moderate-high pitch + moderate-high energy + faster rate (excited, positive)
+        if pitch > 0.55 and pitch < 0.75 and energy > 0.5 and energy < 0.75 and speaking_rate > 0.55:
+            return "happy"
+        
+        # SURPRISED: Very high pitch with sudden change (shocked, startled)
+        # High pitch but not sustained high energy
+        if pitch > 0.75 and energy < 0.7:
+            return "surprised"
+        
+        # SURPRISED: High pitch + moderate energy + slow/moderate rate (unexpected)
+        if pitch > 0.7 and energy > 0.45 and energy < 0.65 and speaking_rate < 0.6:
+            return "surprised"
+        
+        # SAD: Low pitch + low energy + slow rate (depressed, tired)
+        if pitch < 0.4 and energy < 0.4:
             return "sad"
         
-        # Moderate everything → neutral
-        else:
-            return "neutral"
+        # SAD: Low energy alone (lethargic)
+        if energy < 0.3:
+            return "sad"
+        
+        # NEUTRAL: Everything else (moderate values, no strong patterns)
+        # This includes most normal speech patterns
+        return "neutral"
     
     async def _mock_emotion_detection(self, audio_data: bytes) -> Dict:
         """
@@ -223,7 +250,8 @@ class EmotionDetectionService:
         emotion_idx = int(hash_val * len(emotions))
         emotion = emotions[emotion_idx]
         
-        logger.info(f"Mock emotion detection: {emotion}")
+        logger.warning(f"⚠ MOCK DETECTION USED (not real model): {emotion}")
+        logger.warning(f"⚠ Install OpenSmile to use real emotion detection")
         
         return {
             "emotion": emotion,

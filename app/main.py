@@ -115,85 +115,237 @@ async def health_check():
 @app.post("/api/process-audio", response_model=ProcessAudioResponse)
 async def process_audio(audio: UploadFile = File(...)):
     """
-    Process audio file through complete translation pipeline.
+    Unified API endpoint for complete speech translation pipeline with emotion preservation.
     
-    Pipeline:
-    1. Speech-to-Text (Deepgram) - transcribe with language detection
-    2. Emotion Detection (OpenSmile) - extract emotional attributes
-    3. Translation (DeepL) - translate to target language
-    4. Text-to-Speech (ElevenLabs) - generate emotional speech
+    Pipeline Flow:
+    1. Speech-to-Text (Deepgram) - Transcribe audio and detect source language
+    2. Emotion Detection (OpenSmile) - Extract emotional characteristics from audio
+    3. Text Translation (DeepL) - Translate text to target language (EN ↔ ES)
+    4. Text-to-Speech (ElevenLabs) - Generate emotional speech in target language
+    
+    Features:
+    - Automatic bidirectional language detection (English ↔ Spanish)
+    - Emotion preservation throughout the pipeline
+    - Comprehensive error handling at each stage
+    - Performance tracking and detailed logging
+    - Redis caching for audio data
     
     Args:
         audio: Audio file (mp3, wav, m4a, flac, ogg, webm)
+               Max size: 25MB
     
     Returns:
-        Complete translation result with audio
+        ProcessAudioResponse with:
+        - Original transcribed text and language
+        - Translated text and target language
+        - Detected emotion and attributes
+        - Generated audio (base64 encoded)
+    
+    Raises:
+        HTTPException: 400 for invalid input, 500 for processing errors
     """
+    import time
+    
     cache_key = None
+    pipeline_start = time.time()
+    
+    # Pipeline stage tracking
+    stages = {
+        "validation": {"status": "pending", "duration": 0},
+        "transcription": {"status": "pending", "duration": 0},
+        "emotion_detection": {"status": "pending", "duration": 0},
+        "translation": {"status": "pending", "duration": 0},
+        "audio_generation": {"status": "pending", "duration": 0},
+    }
     
     try:
+        # ============================================================
+        # STAGE 0: Validation & Preparation
+        # ============================================================
+        stage_start = time.time()
+        logger.info("=" * 80)
+        logger.info(f"🎙️  PIPELINE START: {audio.filename}")
+        logger.info("=" * 80)
+        
         # Validate audio file
-        validate_audio_file(audio)
-        logger.info(f"Processing audio file: {audio.filename}")
+        try:
+            validate_audio_file(audio)
+            logger.info(f"✓ Audio validation passed: {audio.filename}")
+        except Exception as e:
+            logger.error(f"✗ Audio validation failed: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Invalid audio file: {str(e)}")
         
         # Read audio data
         audio_data = await audio.read()
+        audio_size_mb = len(audio_data) / (1024 * 1024)
+        logger.info(f"📊 Audio size: {audio_size_mb:.2f} MB ({len(audio_data)} bytes)")
         
-        # Cache audio in Redis
+        # Cache audio in Redis for potential retry/debugging
         cache_key = generate_audio_key()
         await redis_client.set_audio(cache_key, audio_data)
-        logger.debug(f"Audio cached with key: {cache_key}")
+        logger.info(f"💾 Audio cached: {cache_key}")
         
-        # Step 1: Speech-to-Text
-        logger.info("Step 1: Transcribing audio...")
-        transcription = await speech_to_text_service.transcribe_audio(
-            audio_data,
-            mimetype=audio.content_type or "audio/wav"
-        )
-        original_text = transcription["text"]
-        original_language = transcription["language"]
-        source_lang_code = transcription["language_code"]
-        logger.info(f"Transcription complete. Language: {original_language}")
+        stages["validation"]["status"] = "completed"
+        stages["validation"]["duration"] = time.time() - stage_start
         
-        # Step 2: Emotion Detection
-        logger.info("Step 2: Detecting emotion...")
-        emotion_result = await emotion_detection_service.detect_emotion(
-            audio_data,
-            filename=audio.filename
-        )
-        emotion = emotion_result["emotion"]
-        emotion_attributes = emotion_result["attributes"]
-        logger.info(f"Emotion detection complete. Emotion: {emotion}")
+        # ============================================================
+        # STAGE 1: Speech-to-Text Transcription
+        # ============================================================
+        stage_start = time.time()
+        logger.info("-" * 80)
+        logger.info("📝 STAGE 1: Speech-to-Text Transcription")
+        logger.info("-" * 80)
         
-        # Step 3: Translation
-        logger.info("Step 3: Translating text...")
-        translation_result = await translation_service.translate_text(
-            text=original_text,
-            source_lang=source_lang_code,
-        )
-        translated_text = translation_result["translated_text"]
-        target_language = translation_result["target_language"]
-        logger.info(f"Translation complete. Target: {target_language}")
+        try:
+            transcription = await speech_to_text_service.transcribe_audio(
+                audio_data,
+                mimetype=audio.content_type or "audio/wav"
+            )
+            original_text = transcription["text"]
+            original_language = transcription["language"]
+            source_lang_code = transcription["language_code"]
+            
+            logger.info(f"✓ Transcription successful")
+            logger.info(f"  Language: {original_language} ({source_lang_code})")
+            logger.info(f"  Text: {original_text[:100]}{'...' if len(original_text) > 100 else ''}")
+            
+            stages["transcription"]["status"] = "completed"
+            stages["transcription"]["duration"] = time.time() - stage_start
+            
+        except Exception as e:
+            stages["transcription"]["status"] = "failed"
+            stages["transcription"]["error"] = str(e)
+            logger.error(f"✗ Transcription failed: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Speech-to-text transcription failed: {str(e)}"
+            )
         
-        # Step 4: Text-to-Speech with emotion
-        logger.info("Step 4: Generating emotional speech...")
-        generated_audio = await text_to_speech_service.generate_audio(
-            text=translated_text,
-            emotion=emotion,
-            emotion_attributes=emotion_attributes,
-            language_code=target_language,
-        )
-        logger.info(f"Audio generation complete. Size: {len(generated_audio)} bytes")
+        # ============================================================
+        # STAGE 2: Emotion Detection
+        # ============================================================
+        stage_start = time.time()
+        logger.info("-" * 80)
+        logger.info("😊 STAGE 2: Emotion Detection")
+        logger.info("-" * 80)
         
+        try:
+            emotion_result = await emotion_detection_service.detect_emotion(
+                audio_data,
+                filename=audio.filename
+            )
+            emotion = emotion_result["emotion"]
+            emotion_attributes = emotion_result["attributes"]
+            
+            logger.info(f"✓ Emotion detection successful")
+            logger.info(f"  Emotion: {emotion}")
+            logger.info(f"  Attributes: pitch={emotion_attributes.get('pitch_mean', 0):.2f}, "
+                       f"energy={emotion_attributes.get('energy', 0):.2f}, "
+                       f"rate={emotion_attributes.get('speaking_rate', 0):.2f}")
+            
+            stages["emotion_detection"]["status"] = "completed"
+            stages["emotion_detection"]["duration"] = time.time() - stage_start
+            
+        except Exception as e:
+            stages["emotion_detection"]["status"] = "failed"
+            stages["emotion_detection"]["error"] = str(e)
+            logger.warning(f"⚠ Emotion detection failed, using neutral: {str(e)}")
+            # Fallback to neutral emotion
+            emotion = "neutral"
+            emotion_attributes = {
+                "pitch_mean": 0.5,
+                "energy": 0.5,
+                "speaking_rate": 0.5,
+            }
+        
+        # ============================================================
+        # STAGE 3: Text Translation
+        # ============================================================
+        stage_start = time.time()
+        logger.info("-" * 80)
+        logger.info("🌐 STAGE 3: Text Translation")
+        logger.info("-" * 80)
+        
+        try:
+            translation_result = await translation_service.translate_text(
+                text=original_text,
+                source_lang=source_lang_code,
+            )
+            translated_text = translation_result["translated_text"]
+            target_language = translation_result["target_language"]
+            
+            logger.info(f"✓ Translation successful")
+            logger.info(f"  Direction: {source_lang_code.upper()} → {target_language.upper()}")
+            logger.info(f"  Translated: {translated_text[:100]}{'...' if len(translated_text) > 100 else ''}")
+            
+            stages["translation"]["status"] = "completed"
+            stages["translation"]["duration"] = time.time() - stage_start
+            
+        except Exception as e:
+            stages["translation"]["status"] = "failed"
+            stages["translation"]["error"] = str(e)
+            logger.error(f"✗ Translation failed: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Text translation failed: {str(e)}"
+            )
+        
+        # ============================================================
+        # STAGE 4: Text-to-Speech Generation with Emotion
+        # ============================================================
+        stage_start = time.time()
+        logger.info("-" * 80)
+        logger.info("🔊 STAGE 4: Emotional Text-to-Speech Generation")
+        logger.info("-" * 80)
+        
+        try:
+            generated_audio = await text_to_speech_service.generate_audio(
+                text=translated_text,
+                emotion=emotion,
+                emotion_attributes=emotion_attributes,
+                language_code=target_language,
+            )
+            
+            output_size_mb = len(generated_audio) / (1024 * 1024)
+            logger.info(f"✓ Audio generation successful")
+            logger.info(f"  Size: {output_size_mb:.2f} MB ({len(generated_audio)} bytes)")
+            logger.info(f"  Emotion applied: {emotion}")
+            
+            stages["audio_generation"]["status"] = "completed"
+            stages["audio_generation"]["duration"] = time.time() - stage_start
+            
+        except Exception as e:
+            stages["audio_generation"]["status"] = "failed"
+            stages["audio_generation"]["error"] = str(e)
+            logger.error(f"✗ Audio generation failed: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Text-to-speech generation failed: {str(e)}"
+            )
+        
+        # ============================================================
+        # FINALIZATION
+        # ============================================================
         # Encode audio to base64 for JSON response
         audio_base64 = base64.b64encode(generated_audio).decode('utf-8')
         
         # Clean up cache
         if cache_key:
             await redis_client.delete_audio(cache_key)
-            logger.debug(f"Cache cleaned: {cache_key}")
+            logger.debug(f"🗑️  Cache cleaned: {cache_key}")
         
-        logger.info("Processing complete!")
+        # Calculate total pipeline duration
+        total_duration = time.time() - pipeline_start
+        
+        logger.info("=" * 80)
+        logger.info(f"✅ PIPELINE COMPLETED SUCCESSFULLY")
+        logger.info(f"⏱️  Total Duration: {total_duration:.2f}s")
+        logger.info(f"   - Validation: {stages['validation']['duration']:.2f}s")
+        logger.info(f"   - Transcription: {stages['transcription']['duration']:.2f}s")
+        logger.info(f"   - Emotion Detection: {stages['emotion_detection']['duration']:.2f}s")
+        logger.info(f"   - Translation: {stages['translation']['duration']:.2f}s")
+        logger.info(f"   - Audio Generation: {stages['audio_generation']['duration']:.2f}s")
+        logger.info("=" * 80)
         
         return ProcessAudioResponse(
             original_text=original_text,
@@ -206,15 +358,28 @@ async def process_audio(audio: UploadFile = File(...)):
             audio_size_bytes=len(generated_audio),
         )
     
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    
     except Exception as e:
+        # Handle unexpected errors
+        logger.error("=" * 80)
+        logger.error(f"❌ PIPELINE FAILED")
+        logger.error(f"Error: {str(e)}")
+        logger.error(f"Stage Status: {stages}")
+        logger.error("=" * 80)
+        
         # Clean up cache on error
         if cache_key:
-            await redis_client.delete_audio(cache_key)
+            try:
+                await redis_client.delete_audio(cache_key)
+            except:
+                pass
         
-        logger.error(f"Processing failed: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Audio processing failed: {str(e)}"
+            detail=f"Audio processing pipeline failed: {str(e)}"
         )
 
 

@@ -75,15 +75,17 @@ class SpeechToTextService:
                 "es": "Spanish",
             }
             
-            language_name = language_map.get(detected_language.lower()[:2], "English")
+            # Extract base language code (2-letter code)
+            language_code = detected_language.lower()[:2]
+            language_name = language_map.get(language_code, "English")
             
-            logger.info(f"Transcription successful. Language: {language_name}")
-            logger.debug(f"Transcript: {transcript[:100]}...")
+            logger.info(f"[DEEPGRAM] Transcription successful")
+            logger.info(f"[DEEPGRAM] Detected language: {language_name} ({language_code})")
+            logger.debug(f"[DEEPGRAM] Transcript: {transcript[:100]}...")
             
             return {
                 "language": language_name,
-                # "language_code": detected_language.lower()[:2],
-                "language_code": 'en',
+                "language_code": language_code,  # Use detected language code
                 "text": transcript,
             }
         

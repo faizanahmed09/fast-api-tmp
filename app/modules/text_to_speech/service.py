@@ -43,11 +43,22 @@ class TextToSpeechService:
             Exception: If generation fails
         """
         try:
+            logger.info(f"[ELEVENLABS] Starting audio generation")
+            logger.info(f"[ELEVENLABS] Text length: {len(text)} characters")
+            logger.info(f"[ELEVENLABS] Target language: {language_code}")
+            logger.info(f"[ELEVENLABS] Emotion to preserve: {emotion}")
+            
             # Map emotion to voice settings
             voice_settings = map_emotion_to_voice_settings(
                 emotion,
                 emotion_attributes or {}
             )
+            
+            logger.info(f"[ELEVENLABS] Voice settings mapped:")
+            logger.info(f"  - Stability: {voice_settings.get('stability', 0.5):.2f}")
+            logger.info(f"  - Similarity Boost: {voice_settings.get('similarity_boost', 0.75):.2f}")
+            logger.info(f"  - Style: {voice_settings.get('style', 0.0):.2f}")
+            logger.info(f"  - Use Speaker Boost: {voice_settings.get('use_speaker_boost', True)}")
             
             url = f"{self.base_url}/text-to-speech/{self.voice_id}"
             
@@ -62,6 +73,9 @@ class TextToSpeechService:
                 "voice_settings": voice_settings,
             }
             
+            logger.info(f"[ELEVENLABS] Calling ElevenLabs API...")
+            logger.info(f"[ELEVENLABS] Model: {self.model_id}, Voice: {self.voice_id}")
+            
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
                     url,
@@ -71,8 +85,9 @@ class TextToSpeechService:
                 response.raise_for_status()
                 audio_data = response.content
             
-            logger.info(f"Audio generation successful. Size: {len(audio_data)} bytes")
-            logger.debug(f"Emotion: {emotion}, Language: {language_code}")
+            logger.info(f"[ELEVENLABS] ✓ Audio generation successful")
+            logger.info(f"[ELEVENLABS] Output size: {len(audio_data)} bytes")
+            logger.info(f"[ELEVENLABS] Emotion preserved: {emotion}")
             
             return audio_data
         

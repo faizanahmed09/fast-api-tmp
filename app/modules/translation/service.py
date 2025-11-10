@@ -43,8 +43,12 @@ class TranslationService:
                 target_lang = self._get_target_language(source_lang)
             
             # Normalize language codes for DeepL
-            source_lang_code = self._normalize_language_code(source_lang)
-            target_lang_code = self._normalize_language_code(target_lang)
+            # Source: simple codes (EN, ES), Target: can have variants (EN-US, EN-GB)
+            source_lang_code = self._normalize_source_language(source_lang)
+            target_lang_code = self._normalize_target_language(target_lang)
+            
+            logger.info(f"[DEEPL] Translating: {source_lang_code} -> {target_lang_code}")
+            logger.debug(f"[DEEPL] Text to translate: {text[:100]}...")
             
             headers = {
                 "Authorization": f"DeepL-Auth-Key {self.api_key}",
@@ -74,17 +78,23 @@ class TranslationService:
             translated_text = translations[0].get("text", "")
             detected_source = translations[0].get("detected_source_language", source_lang_code)
             
-            logger.info(f"Translation successful: {source_lang_code} -> {target_lang_code}")
-            logger.debug(f"Translated text: {translated_text[:100]}...")
+            logger.info(f"[DEEPL] ✓ Translation successful: {source_lang_code} -> {target_lang_code}")
+            logger.info(f"[DEEPL] Translated text: {translated_text[:100]}...")
+            
+            # Extract base language code (remove variants like -US, -GB)
+            target_base_code = target_lang_code.split('-')[0].lower()
+            
+            logger.info(f"[DEEPL] Returning target language: {target_base_code}")
             
             return {
                 "translated_text": translated_text,
                 "source_language": detected_source.lower(),
-                "target_language": target_lang_code.lower(),
+                "target_language": target_base_code,  # Return base code (en, es, etc.)
             }
         
         except httpx.HTTPStatusError as e:
-            logger.error(f"DeepL API error: {e.response.status_code} - {e.response.text}")
+            logger.error(f"[DEEPL] ✗ API error: {e.response.status_code} - {e.response.text}")
+            logger.error(f"[DEEPL] Request data: source_lang={source_lang_code}, target_lang={target_lang_code}")
             raise Exception(f"Translation failed: {e.response.text}")
         except Exception as e:
             logger.error(f"Translation error: {str(e)}")
@@ -94,34 +104,67 @@ class TranslationService:
         """
         Get target language based on source language.
         
+        Logic:
+        - If audio is in Spanish → translate to English
+        - If audio is in English → translate to Spanish
+        
         Args:
             source_lang: Source language code
         
         Returns:
             Target language code
         """
-        lang_map = {
-            "en": "es",
-            "es": "en",
-        }
-        return lang_map.get(source_lang.lower()[:2], "en")
+        source = source_lang.lower()[:2]
+        
+        # If Spanish detected, translate to English
+        if source == "es":
+            logger.info("[TRANSLATION] Spanish detected → translating to English")
+            return "en"
+        
+        # If English detected, translate to Spanish
+        elif source == "en":
+            logger.info("[TRANSLATION] English detected → translating to Spanish")
+            return "es"
+        
+        # Default to English for other languages
+        else:
+            logger.warning(f"[TRANSLATION] Unknown language '{source}' → defaulting to English")
+            return "en"
     
-    def _normalize_language_code(self, lang_code: str) -> str:
+    def _normalize_source_language(self, lang_code: str) -> str:
         """
-        Normalize language code for DeepL API.
+        Normalize source language code for DeepL API.
+        Source languages use simple 2-letter codes (EN, ES, DE, etc.)
         
         Args:
             lang_code: Language code
         
         Returns:
-            Normalized language code (uppercase)
+            Normalized source language code (uppercase, no variants)
         """
-        # DeepL uses uppercase codes
+        # DeepL source languages: simple 2-letter codes only
+        code = lang_code.upper()[:2]
+        return code
+    
+    def _normalize_target_language(self, lang_code: str) -> str:
+        """
+        Normalize target language code for DeepL API.
+        Target languages can use variants (EN-US, EN-GB, PT-BR, etc.)
+        
+        Args:
+            lang_code: Language code
+        
+        Returns:
+            Normalized target language code (uppercase, with variants)
+        """
+        # DeepL target languages: can have variants
         code = lang_code.upper()[:2]
         
-        # Map to DeepL supported codes
+        # Map to DeepL supported target codes with variants
         if code == "EN":
-            return "EN-US"  # or EN-GB
+            return "EN-US"  # Default to US English (can also use EN-GB)
+        elif code == "PT":
+            return "PT-BR"  # Default to Brazilian Portuguese (can also use PT-PT)
         
         return code
 

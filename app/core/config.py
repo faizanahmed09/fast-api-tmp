@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=True,
+        extra="ignore",  # Ignore extra fields from .env
     )
     
     # Application
@@ -18,10 +19,10 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
     
-    # API Keys
-    DEEPGRAM_API_KEY: str
-    DEEPL_API_KEY: str
-    ELEVENLABS_API_KEY: str
+    # API Keys (optional for development/testing)
+    DEEPGRAM_API_KEY: str = "mock-deepgram-key"
+    DEEPL_API_KEY: str = "mock-deepl-key"
+    ELEVENLABS_API_KEY: str = "mock-elevenlabs-key"
     
     # Redis Configuration
     REDIS_HOST: str = "localhost"
