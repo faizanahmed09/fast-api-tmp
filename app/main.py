@@ -51,6 +51,7 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down Speech Translation API...")
+    await speech_to_text_service.cleanup()
     await redis_client.disconnect()
     logger.info("Application shutdown complete")
 
@@ -189,18 +190,48 @@ async def process_audio(audio: UploadFile = File(...)):
         stages["validation"]["duration"] = time.time() - stage_start
         
         # ============================================================
-        # STAGE 1: Speech-to-Text Transcription
+        # STAGE 1 & 2: Parallel Speech-to-Text + Emotion Detection
         # ============================================================
-        stage_start = time.time()
+        import asyncio
+        
+        parallel_start = time.time()
         logger.info("-" * 80)
-        logger.info("📝 STAGE 1: Speech-to-Text Transcription")
+        logger.info("⚡ STAGE 1 & 2: PARALLEL Processing (STT + Emotion)")
         logger.info("-" * 80)
         
+        # Run Speech-to-Text and Emotion Detection in parallel
+        # Both use the same audio data and are independent
         try:
-            transcription = await speech_to_text_service.transcribe_audio(
+            stt_task = speech_to_text_service.transcribe_audio(
                 audio_data,
                 mimetype=audio.content_type or "audio/wav"
             )
+            emotion_task = emotion_detection_service.detect_emotion(
+                audio_data,
+                filename=audio.filename
+            )
+            
+            # Execute both tasks concurrently
+            logger.info("🚀 Running STT and Emotion Detection concurrently...")
+            transcription, emotion_result = await asyncio.gather(
+                stt_task,
+                emotion_task,
+                return_exceptions=True
+            )
+            
+            parallel_duration = time.time() - parallel_start
+            logger.info(f"⚡ Parallel execution completed in {parallel_duration:.2f}s")
+            
+            # Handle transcription result
+            if isinstance(transcription, Exception):
+                stages["transcription"]["status"] = "failed"
+                stages["transcription"]["error"] = str(transcription)
+                logger.error(f"✗ Transcription failed: {str(transcription)}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Speech-to-text transcription failed: {str(transcription)}"
+                )
+            
             original_text = transcription["text"]
             original_language = transcription["language"]
             source_lang_code = transcription["language_code"]
@@ -210,53 +241,39 @@ async def process_audio(audio: UploadFile = File(...)):
             logger.info(f"  Text: {original_text[:100]}{'...' if len(original_text) > 100 else ''}")
             
             stages["transcription"]["status"] = "completed"
-            stages["transcription"]["duration"] = time.time() - stage_start
+            stages["transcription"]["duration"] = parallel_duration
+            
+            # Handle emotion detection result
+            if isinstance(emotion_result, Exception):
+                stages["emotion_detection"]["status"] = "failed"
+                stages["emotion_detection"]["error"] = str(emotion_result)
+                logger.warning(f"⚠ Emotion detection failed, using neutral: {str(emotion_result)}")
+                # Fallback to neutral emotion
+                emotion = "neutral"
+                emotion_attributes = {
+                    "pitch_mean": 0.5,
+                    "energy": 0.5,
+                    "speaking_rate": 0.5,
+                }
+            else:
+                emotion = emotion_result["emotion"]
+                emotion_attributes = emotion_result["attributes"]
+                
+                logger.info(f"✓ Emotion detection successful")
+                logger.info(f"  Emotion: {emotion}")
+                logger.info(f"  Attributes: pitch={emotion_attributes.get('pitch_mean', 0):.2f}, "
+                           f"energy={emotion_attributes.get('energy', 0):.2f}, "
+                           f"rate={emotion_attributes.get('speaking_rate', 0):.2f}")
+                
+                stages["emotion_detection"]["status"] = "completed"
+                stages["emotion_detection"]["duration"] = parallel_duration
             
         except Exception as e:
-            stages["transcription"]["status"] = "failed"
-            stages["transcription"]["error"] = str(e)
-            logger.error(f"✗ Transcription failed: {str(e)}")
+            logger.error(f"✗ Parallel processing failed: {str(e)}")
             raise HTTPException(
                 status_code=500,
-                detail=f"Speech-to-text transcription failed: {str(e)}"
+                detail=f"Parallel processing failed: {str(e)}"
             )
-        
-        # ============================================================
-        # STAGE 2: Emotion Detection
-        # ============================================================
-        stage_start = time.time()
-        logger.info("-" * 80)
-        logger.info("😊 STAGE 2: Emotion Detection")
-        logger.info("-" * 80)
-        
-        try:
-            emotion_result = await emotion_detection_service.detect_emotion(
-                audio_data,
-                filename=audio.filename
-            )
-            emotion = emotion_result["emotion"]
-            emotion_attributes = emotion_result["attributes"]
-            
-            logger.info(f"✓ Emotion detection successful")
-            logger.info(f"  Emotion: {emotion}")
-            logger.info(f"  Attributes: pitch={emotion_attributes.get('pitch_mean', 0):.2f}, "
-                       f"energy={emotion_attributes.get('energy', 0):.2f}, "
-                       f"rate={emotion_attributes.get('speaking_rate', 0):.2f}")
-            
-            stages["emotion_detection"]["status"] = "completed"
-            stages["emotion_detection"]["duration"] = time.time() - stage_start
-            
-        except Exception as e:
-            stages["emotion_detection"]["status"] = "failed"
-            stages["emotion_detection"]["error"] = str(e)
-            logger.warning(f"⚠ Emotion detection failed, using neutral: {str(e)}")
-            # Fallback to neutral emotion
-            emotion = "neutral"
-            emotion_attributes = {
-                "pitch_mean": 0.5,
-                "energy": 0.5,
-                "speaking_rate": 0.5,
-            }
         
         # ============================================================
         # STAGE 3: Text Translation

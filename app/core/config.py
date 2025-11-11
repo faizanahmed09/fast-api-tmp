@@ -19,24 +19,29 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
     
-    # API Keys (optional for development/testing)
+    # API Keys
     DEEPGRAM_API_KEY: str = "mock-deepgram-key"
     DEEPL_API_KEY: str = "mock-deepl-key"
     ELEVENLABS_API_KEY: str = "mock-elevenlabs-key"
+    
+    # API Endpoints
+    DEEPGRAM_API_URL: str = "https://api.deepgram.com/v1/listen"
+    DEEPL_API_URL: str = "https://api-free.deepl.com/v2/translate"
+    ELEVENLABS_API_URL: str = "https://api.elevenlabs.io/v1"
     
     # Redis Configuration
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
     REDIS_PASSWORD: Optional[str] = None
-    REDIS_CACHE_TTL: int = 3600  # 1 hour in seconds
+    REDIS_CACHE_TTL: int = 3600
     
     # Audio Processing
     MAX_AUDIO_SIZE_MB: int = 25
     SUPPORTED_AUDIO_FORMATS: list = [".mp3", ".wav", ".m4a", ".flac", ".ogg", ".webm"]
     
     # ElevenLabs Configuration
-    ELEVENLABS_VOICE_ID: str = "21m00Tcm4TlvDq8ikWAM"  # Default voice (Rachel)
+    ELEVENLABS_VOICE_ID: str = "pNInz6obpgDQGcFmaJgB"  # Adam (Male)
     ELEVENLABS_MODEL_ID: str = "eleven_multilingual_v2"
     
     # OpenSmile Configuration

@@ -21,13 +21,16 @@ class EmotionDetectionService:
         try:
             import opensmile
             logger.info("OpenSmile library imported successfully")
+            # Use ComParE feature set for faster processing
+            # eGeMAPSv02 has 88 features, ComParE_2016 is optimized
             self.smile = opensmile.Smile(
                 feature_set=opensmile.FeatureSet.eGeMAPSv02,
                 feature_level=opensmile.FeatureLevel.Functionals,
+                num_workers=2,  # Parallel processing
             )
             self.opensmile_available = True
             logger.info("✓ OpenSmile initialized successfully - REAL MODEL ACTIVE")
-            logger.info(f"Feature set: eGeMAPSv02, Level: Functionals")
+            logger.info(f"Feature set: eGeMAPSv02, Level: Functionals, Workers: 2")
         except ImportError as e:
             logger.warning("✗ OpenSmile not available, using mock emotion detection")
             logger.warning(f"Import error: {e}")
@@ -69,10 +72,13 @@ class EmotionDetectionService:
             suffix = Path(filename).suffix.lower() or ".wav"
             
             # Create temp file without automatic deletion (Windows compatibility)
+            # Use buffered write for better performance
             temp_fd, temp_path = tempfile.mkstemp(suffix=suffix)
             try:
-                # Write audio data and close the file descriptor
-                os.write(temp_fd, audio_data)
+                # Write audio data in chunks for large files
+                chunk_size = 8192
+                for i in range(0, len(audio_data), chunk_size):
+                    os.write(temp_fd, audio_data[i:i+chunk_size])
                 os.close(temp_fd)
                 
                 # Verify file exists and is readable

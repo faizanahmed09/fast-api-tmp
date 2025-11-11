@@ -9,16 +9,7 @@ class TimingMiddleware(BaseHTTPMiddleware):
     """Middleware to log request processing time."""
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        """
-        Process request and add timing header.
-        
-        Args:
-            request: Incoming request
-            call_next: Next middleware/endpoint
-            
-        Returns:
-            Response with timing header
-        """
+        """Process request and add timing header."""
         start_time = time.time()
         response = await call_next(request)
         process_time = time.time() - start_time

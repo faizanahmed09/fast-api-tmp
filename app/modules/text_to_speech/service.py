@@ -16,9 +16,20 @@ class TextToSpeechService:
     
     def __init__(self):
         self.api_key = settings.ELEVENLABS_API_KEY
-        self.base_url = "https://api.elevenlabs.io/v1"
+        self.base_url = settings.ELEVENLABS_API_URL
         self.voice_id = settings.ELEVENLABS_VOICE_ID
         self.model_id = settings.ELEVENLABS_MODEL_ID
+        self._client = None
+    
+    async def _get_client(self):
+        """Get or create reusable HTTP client with optimized settings."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(60.0, connect=10.0),  # Longer timeout for audio generation
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+                http2=True
+            )
+        return self._client
     
     async def generate_audio(
         self,
@@ -71,19 +82,20 @@ class TextToSpeechService:
                 "text": text,
                 "model_id": self.model_id,
                 "voice_settings": voice_settings,
+                "optimize_streaming_latency": 3,  # Optimize for lower latency (0-4)
             }
             
             logger.info(f"[ELEVENLABS] Calling ElevenLabs API...")
             logger.info(f"[ELEVENLABS] Model: {self.model_id}, Voice: {self.voice_id}")
             
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    url,
-                    headers=headers,
-                    json=payload,
-                )
-                response.raise_for_status()
-                audio_data = response.content
+            client = await self._get_client()
+            response = await client.post(
+                url,
+                headers=headers,
+                json=payload,
+            )
+            response.raise_for_status()
+            audio_data = response.content
             
             logger.info(f"[ELEVENLABS] ✓ Audio generation successful")
             logger.info(f"[ELEVENLABS] Output size: {len(audio_data)} bytes")
@@ -92,11 +104,21 @@ class TextToSpeechService:
             return audio_data
         
         except httpx.HTTPStatusError as e:
-            logger.error(f"ElevenLabs API error: {e.response.status_code} - {e.response.text}")
-            raise Exception(f"Audio generation failed: {e.response.text}")
+            error_detail = e.response.text if hasattr(e.response, 'text') else str(e)
+            logger.error(f"ElevenLabs API error: {e.response.status_code}")
+            logger.error(f"Response: {error_detail}")
+            
+            if e.response.status_code == 401:
+                raise Exception("Invalid ElevenLabs API key. Please check your ELEVENLABS_API_KEY in .env file")
+            elif e.response.status_code == 403:
+                raise Exception("ElevenLabs API access forbidden. Check your API key and quota")
+            else:
+                raise Exception(f"ElevenLabs API error ({e.response.status_code}): {error_detail}")
         except Exception as e:
-            logger.error(f"Audio generation error: {str(e)}")
-            raise
+            error_msg = str(e) if str(e) else "Unknown audio generation error"
+            logger.error(f"Audio generation error: {error_msg}")
+            logger.exception("Full traceback:")
+            raise Exception(error_msg)
     
     async def get_available_voices(self) -> list:
         """

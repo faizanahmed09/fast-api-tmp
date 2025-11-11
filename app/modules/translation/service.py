@@ -15,7 +15,18 @@ class TranslationService:
     
     def __init__(self):
         self.api_key = settings.DEEPL_API_KEY
-        self.base_url = "https://api-free.deepl.com/v2/translate"  # Use api.deepl.com for paid plans
+        self.base_url = settings.DEEPL_API_URL
+        self._client = None
+    
+    async def _get_client(self):
+        """Get or create reusable HTTP client with optimized settings."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(30.0, connect=5.0),
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+                http2=True
+            )
+        return self._client
     
     async def translate_text(
         self, 
@@ -59,16 +70,17 @@ class TranslationService:
                 "text": text,
                 "source_lang": source_lang_code,
                 "target_lang": target_lang_code,
+                "formality": "default",  # Faster than "more" or "less"
             }
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    self.base_url,
-                    headers=headers,
-                    data=data,
-                )
-                response.raise_for_status()
-                result = response.json()
+            client = await self._get_client()
+            response = await client.post(
+                self.base_url,
+                headers=headers,
+                data=data,
+            )
+            response.raise_for_status()
+            result = response.json()
             
             # Extract translation
             translations = result.get("translations", [])
@@ -93,12 +105,19 @@ class TranslationService:
             }
         
         except httpx.HTTPStatusError as e:
-            logger.error(f"[DEEPL] ✗ API error: {e.response.status_code} - {e.response.text}")
-            logger.error(f"[DEEPL] Request data: source_lang={source_lang_code}, target_lang={target_lang_code}")
-            raise Exception(f"Translation failed: {e.response.text}")
+            error_detail = e.response.text if hasattr(e.response, 'text') else str(e)
+            logger.error(f"DeepL API error: {e.response.status_code}")
+            logger.error(f"Response: {error_detail}")
+            
+            if e.response.status_code == 401 or e.response.status_code == 403:
+                raise Exception("Invalid DeepL API key. Please check your DEEPL_API_KEY in .env file")
+            else:
+                raise Exception(f"DeepL API error ({e.response.status_code}): {error_detail}")
         except Exception as e:
-            logger.error(f"Translation error: {str(e)}")
-            raise
+            error_msg = str(e) if str(e) else "Unknown translation error"
+            logger.error(f"Translation error: {error_msg}")
+            logger.exception("Full traceback:")
+            raise Exception(error_msg)
     
     def _get_target_language(self, source_lang: str) -> str:
         """
