@@ -188,7 +188,7 @@ class EmotionDetectionService:
     
     def _classify_emotion(self, attributes: Dict[str, float]) -> str:
         """
-        Classify emotion based on acoustic attributes.
+        Classify emotion based on acoustic attributes using a scoring system.
         
         Args:
             attributes: Dictionary of normalized attributes
@@ -200,41 +200,77 @@ class EmotionDetectionService:
         energy = attributes.get("energy", 0.5)
         speaking_rate = attributes.get("speaking_rate", 0.5)
         
-        # Rule-based classification with balanced thresholds
-        # Each emotion has distinct acoustic patterns
+        logger.debug(f"[CLASSIFY] Analyzing: pitch={pitch:.3f}, energy={energy:.3f}, rate={speaking_rate:.3f}")
         
-        # ANGRY: High energy + high pitch + fast rate (shouting)
-        if energy > 0.7 and pitch > 0.6:
-            return "angry"
+        # Score-based classification for better accuracy
+        # Calculate scores for each emotion based on multiple factors
         
-        # ANGRY: Very high energy alone (aggressive)
-        if energy > 0.8:
-            return "angry"
+        scores = {
+            "neutral": 0,
+            "angry": 0,
+            "happy": 0,
+            "sad": 0,
+            "surprised": 0
+        }
         
-        # HAPPY: Moderate-high pitch + moderate-high energy + faster rate (excited, positive)
-        if pitch > 0.55 and pitch < 0.75 and energy > 0.5 and energy < 0.75 and speaking_rate > 0.55:
-            return "happy"
+        # ANGRY scoring: High pitch + high energy + potentially fast rate
+        if pitch > 0.65 and energy > 0.55:
+            scores["angry"] += 3  # Strong indicator
+        if pitch > 0.62 and energy > 0.52:
+            scores["angry"] += 2  # Moderate indicator
+        if energy > 0.75:
+            scores["angry"] += 2  # Very high energy
+        if pitch > 0.7 and speaking_rate > 0.55:
+            scores["angry"] += 1  # Fast aggressive speech
         
-        # SURPRISED: Very high pitch with sudden change (shocked, startled)
-        # High pitch but not sustained high energy
-        if pitch > 0.75 and energy < 0.7:
-            return "surprised"
+        # HAPPY scoring: Moderate-high pitch + moderate energy + faster rate
+        if 0.55 < pitch < 0.68 and 0.48 < energy < 0.62 and speaking_rate > 0.52:
+            scores["happy"] += 3  # Balanced positive
+        if 0.58 < pitch < 0.65 and energy > 0.5:
+            scores["happy"] += 2  # Pleasant tone
+        if speaking_rate > 0.58 and energy > 0.48:
+            scores["happy"] += 1  # Energetic speech
         
-        # SURPRISED: High pitch + moderate energy + slow/moderate rate (unexpected)
-        if pitch > 0.7 and energy > 0.45 and energy < 0.65 and speaking_rate < 0.6:
-            return "surprised"
+        # SURPRISED scoring: Very high pitch with moderate energy
+        if pitch > 0.78:
+            scores["surprised"] += 3  # Very high pitch
+        if pitch > 0.72 and energy < 0.65:
+            scores["surprised"] += 2  # High pitch, not too loud
+        if pitch > 0.75 and 0.45 < energy < 0.6:
+            scores["surprised"] += 1  # Startled pattern
         
-        # SAD: Low pitch + low energy + slow rate (depressed, tired)
-        if pitch < 0.4 and energy < 0.4:
-            return "sad"
+        # SAD scoring: Low pitch + low energy + slow rate
+        if pitch < 0.42 and energy < 0.42:
+            scores["sad"] += 3  # Strong sad indicator
+        if pitch < 0.48 and energy < 0.48:
+            scores["sad"] += 2  # Moderate sad indicator
+        if energy < 0.38:
+            scores["sad"] += 2  # Very low energy
+        if speaking_rate < 0.45 and energy < 0.5:
+            scores["sad"] += 1  # Slow, low energy
         
-        # SAD: Low energy alone (lethargic)
-        if energy < 0.3:
-            return "sad"
+        # NEUTRAL scoring: Moderate values across all attributes
+        if 0.45 <= pitch <= 0.62 and 0.42 <= energy <= 0.58:
+            scores["neutral"] += 2  # Balanced moderate values
+        if 0.48 <= speaking_rate <= 0.55:
+            scores["neutral"] += 1  # Normal speaking rate
         
-        # NEUTRAL: Everything else (moderate values, no strong patterns)
-        # This includes most normal speech patterns
-        return "neutral"
+        # Find emotion with highest score
+        max_score = max(scores.values())
+        
+        # Require minimum score of 2 to classify as non-neutral
+        if max_score < 2:
+            logger.debug(f"[CLASSIFY] All scores too low, defaulting to NEUTRAL")
+            logger.debug(f"[CLASSIFY] Scores: {scores}")
+            return "neutral"
+        
+        # Get emotion with highest score
+        detected_emotion = max(scores, key=scores.get)
+        
+        logger.debug(f"[CLASSIFY] Scores: {scores}")
+        logger.debug(f"[CLASSIFY] Detected: {detected_emotion.upper()} (score: {max_score})")
+        
+        return detected_emotion
     
     async def _mock_emotion_detection(self, audio_data: bytes) -> Dict:
         """

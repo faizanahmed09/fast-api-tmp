@@ -57,7 +57,7 @@ class SpeechToTextService:
         for attempt in range(max_retries):
             try:
                 return await self._transcribe_with_retry(audio_data, mimetype, attempt)
-            except (httpcore.ConnectionNotAvailable, httpcore.RemoteProtocolError, httpcore.ConnectionTerminated) as e:
+            except (httpcore.ConnectionNotAvailable, httpcore.RemoteProtocolError) as e:
                 logger.warning(f"Connection error on attempt {attempt + 1}/{max_retries}: {type(e).__name__}")
                 
                 # Reset client on connection errors
@@ -158,7 +158,7 @@ class SpeechToTextService:
                 raise Exception("Deepgram API access forbidden. Check your API key permissions")
             else:
                 raise Exception(f"Deepgram API error ({e.response.status_code}): {error_detail}")
-        except (httpcore.ConnectionNotAvailable, httpcore.RemoteProtocolError, httpcore.ConnectionTerminated) as e:
+        except (httpcore.ConnectionNotAvailable, httpcore.RemoteProtocolError) as e:
             # Re-raise connection errors to be handled by retry logic
             logger.error(f"Connection error: {type(e).__name__} - {str(e)}")
             raise
