@@ -37,7 +37,8 @@ class Settings(BaseSettings):
     REDIS_CACHE_TTL: int = 3600
     
     # Audio Processing
-    MAX_AUDIO_SIZE_MB: int = 25
+    MAX_AUDIO_SIZE_MB: int = 50  # Increased for long recordings (10+ minutes)
+    MAX_CHUNK_SIZE_MB: int = 10  # Maximum size per chunk
     SUPPORTED_AUDIO_FORMATS: list = [".mp3", ".wav", ".m4a", ".flac", ".ogg", ".webm"]
     
     # ElevenLabs Configuration

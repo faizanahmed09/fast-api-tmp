@@ -8,6 +8,7 @@ import httpcore
 import asyncio
 from typing import Dict
 from app.core.config import settings
+from app.core.audio_utils import convert_to_wav
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class SpeechToTextService:
         """Get or create reusable HTTP client with optimized settings."""
         if self._client is None:
             self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(30.0, connect=5.0),
+                timeout=httpx.Timeout(120.0, connect=10.0),  # Increased to 120s for long audio chunks
                 limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
                 http2=True  # Enable HTTP/2 for better performance
             )
@@ -87,6 +88,13 @@ class SpeechToTextService:
             Dictionary with 'language' and 'text' keys
         """
         try:
+            # Convert audio to WAV format for Deepgram compatibility
+            # WebM/Opus and other formats may not be directly supported
+            if mimetype not in ["audio/wav", "audio/wave"]:
+                logger.info(f"[DEEPGRAM] Converting {mimetype} to WAV for compatibility")
+                audio_data = convert_to_wav(audio_data, source_format=mimetype)
+                mimetype = "audio/wav"
+            
             headers = {
                 "Authorization": f"Token {self.api_key}",
                 "Content-Type": mimetype,
@@ -125,6 +133,18 @@ class SpeechToTextService:
             
             transcript = alternatives[0].get("transcript", "")
             detected_language = channels[0].get("detected_language", "en")
+            confidence = alternatives[0].get("confidence", 0.0)
+            
+            # Log the raw response for debugging
+            logger.debug(f"[DEEPGRAM] Raw transcript: '{transcript}'")
+            logger.debug(f"[DEEPGRAM] Confidence: {confidence}")
+            logger.debug(f"[DEEPGRAM] Detected language: {detected_language}")
+            
+            # Check if transcript is empty
+            if not transcript or transcript.strip() == "":
+                logger.warning(f"[DEEPGRAM] Empty transcript returned. Audio may be silent or too short.")
+                logger.warning(f"[DEEPGRAM] Audio size: {len(audio_data)} bytes")
+                # Still return the result, let the main handler decide what to do
             
             # Map language codes
             language_map = {
@@ -138,7 +158,10 @@ class SpeechToTextService:
             
             logger.info(f"[DEEPGRAM] Transcription successful")
             logger.info(f"[DEEPGRAM] Detected language: {language_name} ({language_code})")
-            logger.debug(f"[DEEPGRAM] Transcript: {transcript[:100]}...")
+            if transcript:
+                logger.info(f"[DEEPGRAM] Transcript: {transcript[:100]}...")
+            else:
+                logger.warning(f"[DEEPGRAM] Transcript is empty")
             
             return {
                 "language": language_name,

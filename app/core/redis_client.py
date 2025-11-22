@@ -102,6 +102,59 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Failed to check key existence: {e}")
             return False
+    
+    async def set(self, key: str, value: str, ex: int = None) -> bool:
+        """
+        Store string data in Redis.
+        
+        Args:
+            key: Cache key
+            value: String value to store
+            ex: Expiration time in seconds
+        
+        Returns:
+            True if successful
+        """
+        try:
+            # Encode string to bytes since decode_responses=False
+            value_bytes = value.encode('utf-8') if isinstance(value, str) else value
+            
+            if ex:
+                await self.redis.setex(key, ex, value_bytes)
+            else:
+                await self.redis.set(key, value_bytes)
+            logger.debug(f"Cached data with key: {key} (expires in {ex}s)" if ex else f"Cached data with key: {key}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to cache data: {e}")
+            logger.exception("Full traceback:")
+            return False
+    
+    async def get(self, key: str) -> Optional[str]:
+        """
+        Retrieve string data from Redis.
+        
+        Args:
+            key: Cache key
+        
+        Returns:
+            String value or None
+        """
+        try:
+            data = await self.redis.get(key)
+            if data:
+                logger.debug(f"Retrieved data with key: {key}")
+                # Decode bytes to string since decode_responses=False
+                if isinstance(data, bytes):
+                    return data.decode('utf-8')
+                return data
+            else:
+                logger.debug(f"No data found for key: {key}")
+                return None
+        except Exception as e:
+            logger.error(f"Failed to retrieve data for key {key}: {e}")
+            logger.exception("Full traceback:")
+            return None
 
 
 # Global Redis client instance

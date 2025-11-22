@@ -25,7 +25,7 @@ class TextToSpeechService:
         """Get or create reusable HTTP client with optimized settings."""
         if self._client is None:
             self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(60.0, connect=10.0),  # Longer timeout for audio generation
+                timeout=httpx.Timeout(180.0, connect=10.0),  # Increased to 180s for long text generation
                 limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
                 http2=True
             )
@@ -55,6 +55,7 @@ class TextToSpeechService:
         """
         try:
             logger.info(f"[ELEVENLABS] Starting audio generation")
+            logger.info(f"[ELEVENLABS] Text to synthesize: '{text[:200]}...'")
             logger.info(f"[ELEVENLABS] Text length: {len(text)} characters")
             logger.info(f"[ELEVENLABS] Target language: {language_code}")
             logger.info(f"[ELEVENLABS] Emotion to preserve: {emotion}")
