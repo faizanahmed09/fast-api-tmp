@@ -673,7 +673,19 @@ async def pre_process_chunk(
         
         # Handle transcription result
         if isinstance(transcription, Exception):
-            raise transcription
+            logger.error(f"❌ Speech-to-Text failed: {type(transcription).__name__}: {transcription}")
+            logger.warning("⚠️  Continuing without transcription - returning error to client")
+            
+            # Return error response instead of crashing
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "Speech-to-Text service unavailable",
+                    "message": "The transcription service is currently experiencing issues. This could be due to network timeout or API unavailability. Please try again in a moment.",
+                    "technical_details": str(transcription),
+                    "suggestion": "Check your internet connection and try again."
+                }
+            )
         
         original_text = transcription["text"]
         original_language = transcription["language"]

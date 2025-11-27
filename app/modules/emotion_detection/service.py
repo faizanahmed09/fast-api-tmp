@@ -1,6 +1,6 @@
 """
 Emotion detection service using OpenSmile.
-Extracts emotional attributes from audio (pitch, tone, energy).
+Analyzes acoustic features (pitch, energy, voice quality) for emotion detection.
 """
 import logging
 import tempfile
@@ -9,7 +9,6 @@ from typing import Dict
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
 
 class EmotionDetectionService:
     """Service for detecting emotion from audio using OpenSmile."""
@@ -113,13 +112,13 @@ class EmotionDetectionService:
             attributes = self._extract_emotional_attributes(features)
             logger.info(f"[PROCESSING] Extracted attributes: {attributes}")
             
-            # Classify emotion based on attributes
-            logger.info(f"[CLASSIFICATION] Classifying emotion based on attributes")
+            # Classify emotion based on acoustic features
+            logger.info(f"[CLASSIFICATION] Classifying emotion based on acoustic features")
             emotion = self._classify_emotion(attributes)
             logger.info(f"[CLASSIFICATION] ✓ Classified as: {emotion}")
             
-            logger.info(f"Emotion detected: {emotion} (pitch: {attributes.get('pitch_mean', 0):.2f}, energy: {attributes.get('energy', 0):.2f}, rate: {attributes.get('speaking_rate', 0):.2f})")
-            logger.debug(f"Full attributes: {attributes}")
+            logger.info(f"✓ FINAL RESULT: {emotion.upper()}")
+            logger.info(f"  Features: pitch={attributes.get('pitch_mean', 0):.2f}, pitch_var={attributes.get('pitch_std', 0):.2f}, loudness={attributes.get('loudness_mean', 0):.2f}, loudness_var={attributes.get('loudness_std', 0):.2f}")
             
             return {
                 "emotion": emotion,
@@ -157,119 +156,200 @@ class EmotionDetectionService:
     
     def _extract_emotional_attributes(self, features) -> Dict[str, float]:
         """
-        Extract normalized emotional attributes from OpenSmile features.
+        Extract comprehensive emotional attributes from OpenSmile eGeMAPSv02 features.
+        Uses multiple acoustic features for accurate emotion detection.
         
         Args:
             features: OpenSmile feature dataframe
         
-        Returns:
-            Dictionary of normalized attributes (0-1 range)
         """
-        import numpy as np
+        if features is None or features.empty:
+            logger.warning("No features to extract")
+            return {
+                "pitch_mean": 0,
+                "pitch_std": 0,
+                "loudness_mean": 0,
+                "loudness_std": 0,
+            }
         
-        # Convert to dict and get first row (for functionals)
-        feature_dict = features.iloc[0].to_dict()
+        # Get the first row (single audio file)
+        feature_row = features.iloc[0]
         
-        # Extract key features
-        pitch_mean = feature_dict.get("F0semitoneFrom27.5Hz_sma3nz_amean", 0)
-        energy_mean = feature_dict.get("loudness_sma3_amean", 0)
-        speaking_rate = feature_dict.get("loudness_sma3_percentile20.0", 0)
+        # === ONLY 4 CRITICAL FEATURES ===
+        # 1. Pitch Mean - How high/low the voice is
+        pitch_mean = feature_row.get("F0semitoneFrom27.5Hz_sma3nz_amean", 0)
         
-        logger.debug(f"[FEATURES] Raw pitch: {pitch_mean}, energy: {energy_mean}, rate: {speaking_rate}")
+        # 2. Pitch Variation - How expressive vs monotone
+        pitch_std = feature_row.get("F0semitoneFrom27.5Hz_sma3nz_stddevNorm", 0)
         
-        # Normalize to 0-1 range (rough estimates)
-        attributes = {
-            "pitch_mean": np.clip((pitch_mean + 100) / 200, 0, 1),
-            "energy": np.clip((energy_mean + 40) / 80, 0, 1),
-            "speaking_rate": np.clip((speaking_rate + 40) / 80, 0, 1),
+        # 3. Loudness Mean - How loud the voice is
+        loudness_mean = feature_row.get("loudness_sma3_amean", 0)
+        
+        # 4. Loudness Variation - How dynamic vs flat
+        loudness_std = feature_row.get("loudness_sma3_stddevNorm", 0)
+        
+        logger.info("=" * 80)
+        logger.info("[FEATURES] 4 CRITICAL VALUES:")
+        logger.info(f"  1. Pitch Mean: {pitch_mean:.2f} semitones (high/low)")
+        logger.info(f"  2. Pitch Variation: {pitch_std:.2f} (expressive/monotone)")
+        logger.info(f"  3. Loudness Mean: {loudness_mean:.2f} dB (loud/quiet)")
+        logger.info(f"  4. Loudness Variation: {loudness_std:.2f} (dynamic/flat)")
+        logger.info("=" * 80)
+        
+        # Return only what we need
+        return {
+            "pitch_mean": float(pitch_mean),
+            "pitch_std": float(pitch_std),
+            "loudness_mean": float(loudness_mean),
+            "loudness_std": float(loudness_std),
         }
-        
-        return attributes
     
     def _classify_emotion(self, attributes: Dict[str, float]) -> str:
         """
-        Classify emotion based on acoustic attributes using a scoring system.
+        Classify emotion using RELATIVE comparisons of OpenSmile features.
+        Uses percentile-based analysis instead of absolute thresholds.
         
         Args:
-            attributes: Dictionary of normalized attributes
+            attributes: Dictionary of acoustic attributes from OpenSmile
         
         Returns:
-            Emotion label: happy, sad, angry, neutral, or surprised
+            Emotion label: happy, sad, angry, or neutral
         """
-        pitch = attributes.get("pitch_mean", 0.5)
-        energy = attributes.get("energy", 0.5)
-        speaking_rate = attributes.get("speaking_rate", 0.5)
+        # Extract only the 4 critical features
+        pitch_mean = attributes.get("pitch_mean", 0)
+        pitch_std = attributes.get("pitch_std", 0)
+        loudness_mean = attributes.get("loudness_mean", 0)
+        loudness_std = attributes.get("loudness_std", 0)
         
-        logger.debug(f"[CLASSIFY] Analyzing: pitch={pitch:.3f}, energy={energy:.3f}, rate={speaking_rate:.3f}")
+        logger.info("=" * 80)
+        logger.info("[CLASSIFY] EMOTION CLASSIFICATION ANALYSIS")
+        logger.info(f"  Pitch Mean: {pitch_mean:.2f} semitones")
+        logger.info(f"  Loudness Mean: {loudness_mean:.2f} dB")
+        logger.info(f"  Loudness Std: {loudness_std:.2f}")
+        logger.info(f"  Pitch Std: {pitch_std:.2f}")
         
-        # Score-based classification for better accuracy
-        # Calculate scores for each emotion based on multiple factors
-        
+        # Simple, direct scoring based on key features
         scores = {
             "neutral": 0,
-            "angry": 0,
             "happy": 0,
             "sad": 0,
-            "surprised": 0
+            "angry": 0
         }
         
-        # ANGRY scoring: High pitch + high energy + potentially fast rate
-        if pitch > 0.65 and energy > 0.55:
-            scores["angry"] += 3  # Strong indicator
-        if pitch > 0.62 and energy > 0.52:
-            scores["angry"] += 2  # Moderate indicator
-        if energy > 0.75:
-            scores["angry"] += 2  # Very high energy
-        if pitch > 0.7 and speaking_rate > 0.55:
-            scores["angry"] += 1  # Fast aggressive speech
+        # === HAPPY EMOTION (Check first - positive emotions) ===
+        # Key indicators: MODERATE-HIGH PITCH + VARIATION + GOOD ENERGY.
+        # High, lively voices (excited, laughing) should be happy, not angry.
+
+        if 28.0 <= pitch_mean <= 36.0:
+            # Strong happy: clearly expressive
+            if pitch_std > 0.30:
+                scores["happy"] += 6
+                logger.info(
+                    f"  [HAPPY] Pleasant/high pitch ({pitch_mean:.1f}) with strong variation ({pitch_std:.2f}) (+6)"
+                )
+            # Moderate happy: moderate variation + good energy
+            elif pitch_std > 0.22 and 0.8 <= loudness_mean <= 1.3 and 0.85 <= loudness_std <= 1.3:
+                scores["happy"] += 5
+                logger.info(
+                    f"  [HAPPY] Pleasant/high pitch ({pitch_mean:.1f}) with moderate variation ({pitch_std:.2f}) and good energy ({loudness_mean:.1f} dB, var {loudness_std:.2f}) (+5)"
+                )
+            # Excited happy: high pitch + clearly high energy, even if variation is moderate
+            elif pitch_mean >= 30.0 and loudness_mean >= 1.0 and loudness_std >= 0.75:
+                scores["happy"] += 4
+                logger.info(
+                    f"  [HAPPY] Excited voice: high pitch ({pitch_mean:.1f}), loud ({loudness_mean:.1f} dB), dynamic ({loudness_std:.2f}) (+4)"
+                )
         
-        # HAPPY scoring: Moderate-high pitch + moderate energy + faster rate
-        if 0.55 < pitch < 0.68 and 0.48 < energy < 0.62 and speaking_rate > 0.52:
-            scores["happy"] += 3  # Balanced positive
-        if 0.58 < pitch < 0.65 and energy > 0.5:
-            scores["happy"] += 2  # Pleasant tone
-        if speaking_rate > 0.58 and energy > 0.48:
-            scores["happy"] += 1  # Energetic speech
+        # === ANGRY EMOTION ===
+        # Key indicators: EXTREMELY HIGH PITCH + VERY LOUD + STRONG DYNAMICS (tense/shouting)
+        if pitch_mean > 37:  # Very, very high pitch (shouting)
+            scores["angry"] += 5
+            logger.info(f"  [ANGRY] Extremely high pitch ({pitch_mean:.1f}) - shouting/yelling (+5)")
+        elif pitch_mean > 35:  # High pitch
+            scores["angry"] += 3
+            logger.info(f"  [ANGRY] Very high pitch ({pitch_mean:.1f}) - raised/tense voice (+3)")
         
-        # SURPRISED scoring: Very high pitch with moderate energy
-        if pitch > 0.78:
-            scores["surprised"] += 3  # Very high pitch
-        if pitch > 0.72 and energy < 0.65:
-            scores["surprised"] += 2  # High pitch, not too loud
-        if pitch > 0.75 and 0.45 < energy < 0.6:
-            scores["surprised"] += 1  # Startled pattern
+        if loudness_mean > 1.4:  # Very loud (shouting)
+            scores["angry"] += 4
+            logger.info(f"  [ANGRY] Very loud ({loudness_mean:.1f} dB) - shouting (+4)")
+        elif loudness_mean > 1.2:  # Loud
+            scores["angry"] += 2
+            logger.info(f"  [ANGRY] Loud ({loudness_mean:.1f} dB) (+2)")
         
-        # SAD scoring: Low pitch + low energy + slow rate
-        if pitch < 0.42 and energy < 0.42:
-            scores["sad"] += 3  # Strong sad indicator
-        if pitch < 0.48 and energy < 0.48:
-            scores["sad"] += 2  # Moderate sad indicator
-        if energy < 0.38:
-            scores["sad"] += 2  # Very low energy
-        if speaking_rate < 0.45 and energy < 0.5:
-            scores["sad"] += 1  # Slow, low energy
+        if loudness_std > 1.1:  # Strong energy variation (agitated)
+            scores["angry"] += 2
+            logger.info(f"  [ANGRY] High energy variation ({loudness_std:.1f}) - agitated (+2)")
         
-        # NEUTRAL scoring: Moderate values across all attributes
-        if 0.45 <= pitch <= 0.62 and 0.42 <= energy <= 0.58:
-            scores["neutral"] += 2  # Balanced moderate values
-        if 0.48 <= speaking_rate <= 0.55:
-            scores["neutral"] += 1  # Normal speaking rate
+        # Low pitch variation indicates tension (angry), not happiness
+        if pitch_std < 0.2 and pitch_mean > 30:  # Tense/monotone at high pitch
+            scores["angry"] += 2
+            logger.info(f"  [ANGRY] Tense voice (low variation {pitch_std:.2f} at high pitch) (+2)")
         
-        # Find emotion with highest score
+        # === SAD EMOTION ===
+        # Key indicators: CLEAR LOW PITCH + CLEARLY LOW ENERGY
+        # We want most everyday speech to be NEUTRAL. SAD should only fire
+        # when both pitch AND energy are clearly low.
+        if pitch_mean < 25:  # Very low pitch
+            scores["sad"] += 4
+            logger.info(f"  [SAD] Very low pitch ({pitch_mean:.1f}) - depressed tone (+4)")
+
+        if pitch_std < 0.18:  # Strongly monotone
+            scores["sad"] += 3
+            logger.info(f"  [SAD] Very low pitch variation ({pitch_std:.2f}) - flat/monotone (+3)")
+
+        if loudness_mean < 0.4:  # Clearly quiet / low energy
+            scores["sad"] += 4
+            logger.info(f"  [SAD] Very low energy ({loudness_mean:.1f} dB) (+4)")
+
+        if loudness_std < 0.7:  # Very flat dynamics
+            scores["sad"] += 2
+            logger.info(f"  [SAD] Very flat energy dynamics ({loudness_std:.1f}) (+2)")
+
+        # === NEUTRAL (Default) ===
+        # Everything else that doesn't match strong patterns
+        if 26 <= pitch_mean <= 32:  # Normal-ish pitch range
+            scores["neutral"] += 2
+            logger.info(f"  [NEUTRAL] Normal pitch range ({pitch_mean:.1f}) (+2)")
+
+        if 0.3 <= loudness_mean <= 1.0:  # Normal loudness
+            scores["neutral"] += 2
+            logger.info(f"  [NEUTRAL] Normal loudness ({loudness_mean:.1f} dB) (+2)")
+
+        # Determine final emotion
         max_score = max(scores.values())
-        
-        # Require minimum score of 2 to classify as non-neutral
-        if max_score < 2:
-            logger.debug(f"[CLASSIFY] All scores too low, defaulting to NEUTRAL")
-            logger.debug(f"[CLASSIFY] Scores: {scores}")
-            return "neutral"
-        
-        # Get emotion with highest score
-        detected_emotion = max(scores, key=scores.get)
-        
-        logger.debug(f"[CLASSIFY] Scores: {scores}")
-        logger.debug(f"[CLASSIFY] Detected: {detected_emotion.upper()} (score: {max_score})")
-        
+
+        logger.info(f"\n[CLASSIFY] FINAL SCORES:")
+        for emotion, score in sorted(scores.items(), key=lambda x: x[1], reverse=True):
+            logger.info(f"  {emotion.upper()}: {score}")
+
+        # Get emotion with highest score (default to neutral if all zeros)
+        if max_score == 0:
+            detected_emotion = "neutral"
+            logger.info(f"\n[CLASSIFY] ✓ RESULT: NEUTRAL (no clear indicators)")
+        else:
+            detected_emotion = max(scores, key=scores.get)
+
+        # If SAD wins but looks borderline (small SAD advantage, not clearly low energy),
+        # prefer NEUTRAL so we don't over-detect sadness for everyday neutral speech.
+        sad_score = scores["sad"]
+        neutral_score = scores["neutral"]
+        if (
+            detected_emotion == "sad"
+            and sad_score <= 5  # only small/medium SAD evidence
+            and (sad_score - neutral_score) <= 3
+            and 24.5 <= pitch_mean <= 28.5
+            and 0.35 <= loudness_mean <= 0.9
+            and 0.7 <= loudness_std <= 1.1  # not extremely flat or extreme
+        ):
+            detected_emotion = "neutral"
+            logger.info("  [NEUTRAL_OVERRIDE] Borderline low-pitch, low-energy speech treated as NEUTRAL instead of SAD")
+
+        if detected_emotion == "neutral" and max_score != 0:
+            logger.info(f"\n[CLASSIFY] ✓ RESULT: NEUTRAL (tie-broken from scores)")
+        else:
+            logger.info(f"\n[CLASSIFY] ✓ RESULT: {detected_emotion.upper()} (score: {max_score})")
+
+        logger.info("=" * 80)
         return detected_emotion
     
     async def _mock_emotion_detection(self, audio_data: bytes) -> Dict:
