@@ -2,6 +2,8 @@
 
 Real-time multilingual speech translation with emotion preservation using FastAPI, Deepgram, OpenSmile, DeepL, and ElevenLabs.
 
+---
+
 ## ✨ Features
 
 - 🗣️ **Speech-to-Text** - Automatic transcription with language detection (English/Spanish)
@@ -11,6 +13,8 @@ Real-time multilingual speech translation with emotion preservation using FastAP
 - ⚡ **Async Processing** - Fast, non-blocking API endpoints
 - 💾 **Redis Caching** - Efficient temporary audio storage
 - 📝 **Auto Documentation** - Interactive API docs with Swagger UI
+
+---
 
 ## 🏗️ Architecture
 
@@ -42,70 +46,53 @@ app/
 
 ### Prerequisites
 
-- Python 3.10 or higher (Python 3.13+ supported)
-- Redis server
-- **MediaInfo** (required for MP3 emotion detection on Windows)
-  - Install: `choco install mediainfo` (Windows)
-  - See [MEDIAINFO_INSTALL.md](MEDIAINFO_INSTALL.md) for details
-- API keys for:
-  - [Deepgram](https://console.deepgram.com/)
-  - [DeepL](https://www.deepl.com/pro-api)
-  - [ElevenLabs](https://elevenlabs.io/)
+- **Python 3.13+**
+- **Redis server**
+- **API keys** for Deepgram, DeepL, and ElevenLabs
 
-### 1. Clone and Setup
+> 📘 **Detailed installation guide:** [INSTALLATION.md](INSTALLATION.md)
+
+### Automated Setup (Recommended)
+
+**Linux/macOS:**
+```bash
+./setup.sh
+```
+
+**Windows:**
+```cmd
+setup.bat
+```
+
+### Manual Setup
 
 ```bash
-# Create virtual environment
-python -m venv venv
-
-# Activate virtual environment
-# Windows:
-venv\Scripts\activate
-# Linux/Mac:
-source venv/bin/activate
+# Create and activate virtual environment
+python3.13 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
-```
 
-### 2. Configure Environment
-
-```bash
-# Copy example environment file
+# Configure environment
 cp .env.example .env
+# Edit .env with your API keys
 
-# Edit .env and add your API keys
-# Required: DEEPGRAM_API_KEY, DEEPL_API_KEY, ELEVENLABS_API_KEY
-```
-
-### 3. Start Redis
-
-```bash
-# Using Docker (recommended)
-docker run -d -p 6379:6379 redis:alpine
-
-# Or install Redis locally
-# Windows: https://redis.io/docs/getting-started/installation/install-redis-on-windows/
-# Mac: brew install redis && brew services start redis
-# Linux: sudo apt-get install redis-server && sudo service redis-server start
-```
-
-### 4. Run the Application
-
-```bash
-# Development mode with auto-reload
+# Start Redis and run the app
 uvicorn app.main:app --reload
-
-# Production mode
-uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-The API will be available at: **http://localhost:8000**
+**API Documentation:** http://localhost:8000/docs
 
-## 📖 API Documentation
+---
 
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
+## 📖 Documentation
+
+- **[INSTALLATION.md](INSTALLATION.md)** - Complete installation guide with troubleshooting
+- **[API_REFERENCE.md](API_REFERENCE.md)** - Detailed API documentation and examples
+- **[PYENV_GUIDE.md](PYENV_GUIDE.md)** - Python version management with pyenv
+- **Interactive API Docs** - http://localhost:8000/docs
+- **ReDoc** - http://localhost:8000/redoc
 
 ## 🎯 API Endpoints
 
@@ -294,27 +281,22 @@ pytest tests/test_main.py -v
 
 ## 🐛 Troubleshooting
 
-### Redis Connection Issues
-```bash
-# Check if Redis is running
-redis-cli ping
-# Should return: PONG
+### Quick Fixes
 
-# Test connection
-redis-cli -h localhost -p 6379
+**Redis Connection Issues:**
+```bash
+redis-cli ping  # Should return: PONG
 ```
 
-### OpenSmile Installation Issues
-```bash
-# If OpenSmile fails to install, the API will use mock emotion detection
-# For full functionality, ensure you have:
-pip install opensmile
-```
+**Python Version Issues:**
+- See [PYENV_GUIDE.md](PYENV_GUIDE.md) for pyenv users
+- Ensure Python 3.13+ is installed: `python --version`
 
-### API Key Errors
-- Verify API keys are correctly set in `.env`
+**API Key Errors:**
+- Verify keys in `.env` file (no extra spaces)
 - Check API quotas and limits
-- Ensure no extra spaces in environment variables
+
+> 📘 **For detailed troubleshooting:** [INSTALLATION.md](INSTALLATION.md#troubleshooting)
 
 ## 📝 Development
 
@@ -335,36 +317,23 @@ mypy app/
 
 ## 🚀 Deployment
 
-### Docker Deployment
+See [INSTALLATION.md](INSTALLATION.md#running-the-application) for production deployment options.
 
-```dockerfile
-# Example Dockerfile
-FROM python:3.10-slim
+### Quick Production Start
 
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY app/ ./app/
-COPY .env .
-
-EXPOSE 8000
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
-### Production Considerations
+### Production Checklist
 
-- Use environment-specific `.env` files
-- Set `DEBUG=False` in production
-- Configure proper Redis persistence
-- Set up monitoring and logging
-- Use a process manager (e.g., supervisord, systemd)
-- Configure reverse proxy (nginx, traefik)
-- Enable HTTPS/TLS
-- Set up rate limiting
-- Configure file upload size limits
+- ✅ Set `DEBUG=False` in `.env`
+- ✅ Configure Redis persistence
+- ✅ Set up process manager (systemd/supervisord)
+- ✅ Use reverse proxy (nginx)
+- ✅ Enable HTTPS/TLS
+- ✅ Configure rate limiting
+- ✅ Set up monitoring and logging
 
 ## 📄 License
 
